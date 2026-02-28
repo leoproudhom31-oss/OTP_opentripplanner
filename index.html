@@ -274,11 +274,25 @@
                                   <input type="checkbox" v-model="act.est_paye" class="checkbox-paye !w-5 !h-5">
                                 </div>
                                 <div class="flex items-center ml-1">
+                                  
                                   <div class="flex flex-col bg-white border border-slate-100 rounded-lg shadow-sm">
                                     <button @click.stop="deplacerActivite(groupe.activites, aIdx, -1)" class="w-7 h-5 flex items-center justify-center text-slate-400 hover:text-indigo-500" :disabled="aIdx === 0"><i class="material-icons text-[14px]">expand_less</i></button>
                                     <div class="h-px bg-slate-100"></div>
                                     <button @click.stop="deplacerActivite(groupe.activites, aIdx, 1)" class="w-7 h-5 flex items-center justify-center text-slate-400 hover:text-indigo-500" :disabled="aIdx === groupe.activites.length - 1"><i class="material-icons text-[14px]">expand_more</i></button>
                                   </div>
+
+                                  <div class="relative ml-1.5 w-10 h-10 shrink-0 group/move">
+                                    <select @change="changerGroupeActivite(etape, gIdx, aIdx, $event)" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" title="Déplacer vers un autre jour">
+                                      <option value="" disabled selected>Déplacer vers...</option>
+                                      <option v-for="dest in etape.groupes" :key="dest.id" :value="dest.id" :disabled="dest.id === groupe.id">
+                                        ➡ {{ dest.nom }}
+                                      </option>
+                                    </select>
+                                    <div class="w-full h-full rounded-xl bg-white border border-slate-100 text-slate-400 flex items-center justify-center shadow-sm transition-all group-hover/move:bg-indigo-50 group-hover/move:text-indigo-600 group-hover/move:border-indigo-200">
+                                      <i class="material-icons text-[18px]">shortcut</i>
+                                    </div>
+                                  </div>
+
                                   <button @click.stop="removeItem(groupe.activites, aIdx)" class="w-10 h-10 rounded-xl bg-white border border-slate-100 text-slate-400 hover:bg-rose-500 hover:text-white ml-1.5 shadow-sm flex items-center justify-center transition-all hover:scale-105"><i class="material-icons text-[18px]">delete_outline</i></button>
                                 </div>
                               </div>
@@ -467,7 +481,6 @@
     },
 
     mounted() {
-      // FIX CARTE CASSÉE: On exclut formellement les objets Leaflet de l'état réactif Vue ("data")
       this.map = L.map('map', { zoomControl: false }).setView([46, 2], 5);
       this._markers = []; 
       this._polylines = [];
@@ -489,11 +502,34 @@
     methods: {
       removeItem(a, i) { a.splice(i, 1); },
       deplacerActivite(a, i, d) { const n = i + d; if (n < 0 || n >= a.length) return; a.splice(n, 0, a.splice(i, 1)[0]); },
+      
+      // NOUVELLE FONCTION POUR DÉPLACER ENTRE LES JOURS
+      changerGroupeActivite(etape, fromGroupIdx, actIdx, event) {
+          const toGroupId = event.target.value;
+          if (!toGroupId) return;
+          
+          // Récupère et enlève l'activité du groupe actuel
+          const actToMove = etape.groupes[fromGroupIdx].activites.splice(actIdx, 1)[0];
+          
+          // Trouve le groupe cible et y ajoute l'activité à la fin
+          const targetGroup = etape.groupes.find(g => g.id === toGroupId);
+          if (targetGroup) targetGroup.activites.push(actToMove);
+          
+          // Réinitialise le select pour ne pas afficher le nom du groupe cliqué
+          event.target.value = '';
+      },
+
       ajouterGroupe(e) { e.groupes.push(getEmptyGroupe(e.groupes.length)); },
       addActivityToGroup(g, t) { g.activites.push({ ...getEmptyAct(t), nom: t === 'midi' ? 'Déjeuner' : t === 'soir' ? 'Dîner' : '' }); },
       addTransport(e, t) { e.transports.push({ type: t, depart: '', arrivee: '', heure_depart: '', heure_arrivee: '', ref: '', prix: null, est_paye: false }); },
       addEtape() { this.voyage.etapes.push({ id: generateId(), _isOpen: true, dates: { arrivee: '', depart: '' }, localisation: { villes: [], pays: '' }, hebergement: { nom: '', adresse: '', lien_http: '', prix: null, est_paye: false }, transports: [], groupes: [getEmptyGroupe(0)] }); },
-      supprimerEtape(i) { if (confirm('Supprimer cette étape ?')) this.voyage.etapes.splice(i, 1); },
+      supprimerEtape(i) { 
+        if (confirm('Supprimer cette étape ?')) {
+          const etapeDeleted = this.voyage.etapes[i];
+          this.voyage.etapes.splice(i, 1); 
+          if(this.currentMapContext === etapeDeleted) this.renderGlobalMap();
+        }
+      },
       dragStart(i, e) { this.draggedIndex = i; e.dataTransfer.effectAllowed = 'move'; },
       drop(i) { if (this.draggedIndex === null || this.draggedIndex === i) return; this.voyage.etapes.splice(i, 0, this.voyage.etapes.splice(this.draggedIndex, 1)[0]); this.draggedIndex = null; },
       
@@ -672,7 +708,6 @@
                 if (et.transport.references?.length) et.transport.references.forEach(rf => t.push({ type: 'avion', depart: '', arrivee: '', heure_depart: '', heure_arrivee: '', ref: rf, prix: Math.round(px / et.transport.references.length), est_paye: py }));
                 else if (px > 0) t.push({ type: 'train', depart: '', arrivee: '', heure_depart: '', heure_arrivee: '', ref: '', prix: px, est_paye: py });
               }
-              // Retrocompatibilité transports (Ajout horaires)
               t.forEach(tr => { tr.heure_depart = tr.heure_depart || ''; tr.heure_arrivee = tr.heure_arrivee || ''; });
 
               let gs = et.groupes || [];

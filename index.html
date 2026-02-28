@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Voyage Manager - Glass Pro</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+
+  <style type="text/tailwindcss">
+    @layer utilities { 
+      .scrollbar-hide::-webkit-scrollbar { display: none; } 
+      .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; } 
+      .glass-panel { @apply bg-white/50 backdrop-blur-2xl border border-white/70 shadow-[0_8px_32px_rgba(0,0,0,0.05)]; } 
+      .glass-card { @apply bg-white/60 backdrop-blur-xl border border-white/80 shadow-lg transition-all duration-300 hover:shadow-xl hover:-translate-y-1; } 
+    }
+    
+    body { font-family: 'Inter', system-ui, sans-serif; background: linear-gradient(135deg, #eef2ff 0%, #ffffff 50%, #e0f2fe 100%); color: #1e293b; overflow: hidden; }
+    
+    input, textarea { @apply transition-all duration-300 ease-out; } 
+    input:focus, textarea:focus { @apply ring-4 ring-indigo-500/10 border-indigo-400 bg-white/90; outline: none; }
+    input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; } 
+    input[type=number] { -moz-appearance: textfield; }
+    
+    .list-enter-active, .list-leave-active { transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); } 
+    .list-enter-from, .list-leave-to { opacity: 0; transform: translateY(-20px) scale(0.95); }
+    
+    .checkbox-paye { @apply appearance-none w-5 h-5 border-2 border-white shadow-sm rounded-md bg-white/60 backdrop-blur-md transition-all cursor-pointer relative overflow-hidden shrink-0; } 
+    .checkbox-paye:checked { @apply border-emerald-400 bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.4)]; } 
+    .checkbox-paye:checked::after { content:'✓'; @apply absolute inset-0 flex items-center justify-center text-white text-[12px] font-black; }
+    
+    /* PINS CARTE STABLES ET DESIGN */
+    .custom-div-icon { background: transparent; border: none; outline: none; } 
+    .marker-pin-container { position: relative; filter: drop-shadow(0 6px 8px rgba(0,0,0,0.25)); transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); } 
+    .marker-pin-container:hover { transform: scale(1.25) translateY(-8px); filter: drop-shadow(0 12px 15px rgba(0,0,0,0.3)); z-index: 9999 !important; }
+    .marker-pin { position: absolute; top:0; left:0; right:0; bottom:0; display: flex; align-items: center; justify-content: center; border-radius: 50%; color: white; font-weight: 900; font-size: 14px; border: 3px solid white; z-index: 2; box-shadow: inset 0 0 5px rgba(0,0,0,0.1); }
+    .marker-tail { position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-top: 12px solid white; z-index: 1; }
+    .marker-tail-inner { position: absolute; bottom: -7px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 9px solid; z-index: 3; }
+    
+    .marker-hotel .marker-pin { background-color: #f59e0b; font-size: 16px; animation: pulse-ring 2.5s cubic-bezier(0.215, 0.61, 0.355, 1) infinite; } 
+    .marker-hotel .marker-tail-inner { border-top-color: #f59e0b; } 
+    .marker-global .marker-pin { background-color: #4f46e5; font-size: 18px; } 
+    .marker-global .marker-tail-inner { border-top-color: #4f46e5; }
+
+    .animated-path { stroke-dasharray: 10 15; animation: map-dash 1s linear infinite; } 
+    .animated-path-global { stroke-dasharray: 15 20; animation: map-dash 1.5s linear infinite reverse; }
+    
+    @keyframes map-dash { to { stroke-dashoffset: -25; } } 
+    @keyframes pulse-ring { 0% { box-shadow: inset 0 0 5px rgba(0,0,0,0.1), 0 0 0 0 rgba(245, 158, 11, 0.6); } 80% { box-shadow: inset 0 0 5px rgba(0,0,0,0.1), 0 0 0 15px rgba(245, 158, 11, 0); } 100% { box-shadow: inset 0 0 5px rgba(0,0,0,0.1), 0 0 0 0 rgba(245, 158, 11, 0); } }
+    
+    .glass-tooltip { background: rgba(255,255,255,0.9)!important; backdrop-filter: blur(10px)!important; border: 1px solid rgba(255,255,255,0.8)!important; box-shadow: 0 4px 20px rgba(0,0,0,0.15)!important; border-radius: 12px!important; color: #1d1d1f!important; padding: 6px 12px!important; font-size: 12px!important; font-family: inherit!important; } 
+    .leaflet-tooltip-top:before, .leaflet-tooltip-bottom:before, .leaflet-tooltip-left:before, .leaflet-tooltip-right:before { display: none !important; }
+  </style>
+</head>
+<body class="overflow-hidden">
+
+<div id="app" class="flex h-screen w-screen overflow-hidden relative">
+
+  <div v-if="isGeneratingPDF" class="fixed inset-0 bg-white/50 backdrop-blur-2xl z-[100000] flex flex-col items-center justify-center text-slate-800 transition-opacity duration-500">
+    <div class="relative w-24 h-24 mb-6">
+      <div class="absolute inset-0 border-4 border-indigo-200 rounded-full"></div>
+      <div class="absolute inset-0 border-4 border-indigo-500 rounded-full border-t-transparent animate-spin"></div>
+      <i class="material-icons absolute inset-0 flex items-center justify-center text-4xl text-indigo-500">auto_awesome</i>
+    </div>
+    <h2 class="text-4xl font-black tracking-tight mb-2">Génération Magique...</h2>
+    <p class="text-indigo-500 font-bold text-lg animate-pulse">{{ pdfLoadingMessage }}</p>
+  </div>
+
+  <div class="h-full transition-all duration-500 ease-in-out glass-panel !border-r-white/40 !shadow-none !bg-white/30 relative overflow-hidden z-30 shrink-0 flex flex-col" :class="hoveredSection ? 'w-[5%]' : 'w-[25%]'">
+    
+    <div class="absolute inset-0 w-[25vw] p-5 flex flex-col transition-opacity duration-300 h-full overflow-hidden" :class="hoveredSection ? 'opacity-0 pointer-events-none' : 'opacity-100'">
+      
+      <div class="shrink-0 mb-4 group">
+        <label class="text-[10px] font-black text-indigo-500 uppercase tracking-widest mb-1 flex items-center gap-1.5"><i class="material-icons text-[14px]">flight_takeoff</i> Projet</label>
+        <input v-model="voyage.titre" class="text-3xl font-black text-slate-800 bg-transparent border-b-2 border-indigo-200/50 focus:border-indigo-500 outline-none w-full pb-1 transition-colors placeholder-slate-400" placeholder="Mon Super Roadtrip...">
+      </div>
+      
+      <div class="shrink-0 relative glass-card rounded-[32px] p-5 mb-4">
+        <div class="absolute inset-0 bg-gradient-to-br from-indigo-500/5 to-transparent rounded-[32px] pointer-events-none"></div>
+        <h3 class="font-black text-slate-800 text-xs flex items-center gap-2 mb-3 relative z-10"><i class="material-icons text-white text-[18px] bg-emerald-400 p-1.5 rounded-xl shadow-lg shadow-emerald-400/30">account_balance_wallet</i> Suivi Budget</h3>
+        
+        <div class="grid grid-cols-2 gap-3 mb-3 relative z-10">
+          <div class="bg-white/80 backdrop-blur-sm p-3 rounded-2xl border border-white shadow-sm">
+            <div class="text-[9px] text-slate-400 uppercase font-black mb-1">Total</div>
+            <div class="text-lg font-black text-slate-800">{{ stats.totalGlobal }} €</div>
+          </div>
+          <div class="bg-gradient-to-br from-indigo-500 to-indigo-600 p-3 rounded-2xl border border-indigo-400 shadow-xl shadow-indigo-500/30 relative overflow-hidden text-white">
+            <div class="absolute -right-4 -top-4 w-12 h-12 bg-white/20 rounded-full blur-xl"></div>
+            <div class="text-[9px] text-indigo-200 uppercase font-black mb-1">Perso</div>
+            <div class="text-lg font-black">{{ stats.parPersonne }} €</div>
+          </div>
+        </div>
+
+        <div class="space-y-2 bg-white/80 backdrop-blur-sm p-3 rounded-2xl border border-white shadow-sm relative z-10">
+          <div class="flex justify-between items-center text-xs">
+            <span class="flex items-center gap-1.5 text-emerald-600 font-bold"><i class="material-icons text-[14px]">task_alt</i> Déjà Payé</span>
+            <span class="font-black text-emerald-600">{{ stats.dejaPaye }} €</span>
+          </div>
+          <div class="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden shadow-inner">
+            <div class="bg-gradient-to-r from-emerald-400 to-emerald-500 h-full rounded-full transition-all duration-1000 ease-out relative" :style="'width: '+stats.pourcentagePaye+'%'"></div>
+          </div>
+          <div class="flex justify-between items-center text-xs">
+            <span class="flex items-center gap-1.5 text-rose-500 font-bold"><i class="material-icons text-[14px]">pending_actions</i> Reste à Payer</span>
+            <span class="font-black text-rose-600">{{ stats.resteAPayer }} €</span>
+          </div>
+        </div>
+      </div>
+      
+      <div class="flex-1 glass-card rounded-[32px] p-5 mb-4 flex flex-col min-h-0">
+        <div class="flex justify-between items-center mb-3 shrink-0">
+          <h3 class="font-black text-slate-800 text-xs flex items-center gap-2"><i class="material-icons text-white text-[18px] bg-indigo-400 p-1.5 rounded-xl shadow-lg shadow-indigo-400/30">groups</i> Voyageurs</h3>
+          <button @click="voyage.participants.push('')" class="text-indigo-600 bg-white hover:bg-indigo-50 border border-white shadow-sm p-1.5 rounded-xl transition-all hover:scale-110 hover:shadow-md"><i class="material-icons text-[16px] block">add</i></button>
+        </div>
+        <div class="flex flex-wrap gap-2 overflow-y-auto scrollbar-hide content-start">
+          <transition-group name="list">
+            <div v-for="(p, i) in voyage.participants" :key="i" class="flex items-center bg-white/80 border border-white rounded-xl pl-3 pr-1 py-1 text-xs focus-within:ring-2 ring-indigo-300 transition-all shadow-sm group/pers">
+              <input v-model="voyage.participants[i]" placeholder="Prénom" class="w-16 outline-none bg-transparent font-bold text-slate-700">
+              <button @click.stop="removeItem(voyage.participants, i)" class="text-slate-400 hover:text-white ml-1 bg-white hover:bg-rose-400 rounded-lg w-6 h-6 flex items-center justify-center shadow-sm transition-all"><i class="material-icons text-[14px]">close</i></button>
+            </div>
+          </transition-group>
+        </div>
+      </div>
+      
+      <div class="shrink-0 pt-2 flex flex-col gap-2.5">
+        <div class="grid grid-cols-2 gap-2.5">
+          <label class="cursor-pointer glass-card text-indigo-600 py-3 rounded-2xl flex justify-center items-center gap-1.5 text-xs font-black shadow-md">
+            <i class="material-icons text-[18px]">upload_file</i> Import
+            <input type="file" class="hidden" @change="loadFile" accept=".json">
+          </label>
+          <button @click="saveFile" class="glass-card text-indigo-600 py-3 rounded-2xl flex justify-center items-center gap-1.5 text-xs font-black shadow-md">
+            <i class="material-icons text-[18px]">save</i> Sauver
+          </button>
+        </div>
+        <button @click="generateCleanPDF" class="w-full bg-slate-800 hover:bg-black text-white py-3.5 rounded-2xl flex justify-center items-center gap-2 text-sm font-black shadow-xl hover:shadow-2xl transition-all duration-300 hover:-translate-y-1">
+          <i class="material-icons text-[20px]">picture_as_pdf</i> Export Magique
+        </button>
+      </div>
+    </div>
+    
+    <div class="absolute inset-0 flex items-center justify-center transition-opacity duration-300" :class="hoveredSection ? 'opacity-100' : 'opacity-0 pointer-events-none'">
+      <div class="w-10 h-10 rounded-2xl bg-white/60 backdrop-blur-md border border-white text-indigo-500 flex items-center justify-center shadow-lg transform -rotate-90">
+        <i class="material-icons text-xl font-bold">analytics</i>
+      </div>
+    </div>
+  </div>
+
+  <div class="h-full transition-all duration-500 ease-in-out relative flex flex-col z-20 shrink-0 shadow-2xl" 
+       :class="{'w-[61.66%]': hoveredSection === 'middle', 'w-[25%]': hoveredSection === 'right', 'w-[41.66%]': !hoveredSection}" 
+       @mouseenter="hoveredSection = 'middle'" @mouseleave="hoveredSection = null">
+    
+    <div class="flex justify-between items-center px-10 py-5 glass-panel !border-x-0 shrink-0 sticky top-0 z-30">
+      <h2 class="text-2xl font-black text-slate-800 flex items-center gap-3"><div class="w-12 h-12 bg-gradient-to-br from-indigo-500 to-purple-500 text-white rounded-2xl flex items-center justify-center shadow-xl shadow-indigo-500/40 transform -rotate-6"><i class="material-icons text-2xl">map</i></div> Roadmap</h2>
+      <button @click="addEtape" class="bg-indigo-600 hover:bg-indigo-500 text-white w-12 h-12 rounded-2xl shadow-xl shadow-indigo-500/30 transition-all hover:scale-110 active:scale-95 flex items-center justify-center"><i class="material-icons text-2xl">add</i></button>
+    </div>
+    
+    <div class="flex-1 overflow-y-auto px-8 py-8 scrollbar-hide">
+      <transition-group name="list" tag="div" class="relative z-10 pb-20 space-y-10">
+        
+        <div v-for="(etape, index) in voyage.etapes" :key="etape.id" class="relative pl-12 group cursor-grab active:cursor-grabbing" draggable="true" @dragstart="dragStart(index, $event)" @dragover.prevent @drop="drop(index)">
+          <div v-if="index !== voyage.etapes.length-1" class="absolute left-[35px] top-12 -bottom-16 w-[3px] bg-indigo-200/50 z-0 transition-colors duration-500 group-hover:bg-indigo-400 rounded-full"></div>
+          <div class="absolute left-6 top-8 w-6 h-6 rounded-full bg-gradient-to-br from-indigo-400 to-indigo-600 border-[4px] border-white shadow-xl z-10 flex items-center justify-center transition-transform group-hover:scale-125"><div class="w-1.5 h-1.5 bg-white rounded-full"></div></div>
+          
+          <div class="glass-card !bg-white/50 rounded-[36px] overflow-hidden relative z-20" :class="etape._isOpen ? 'ring-4 ring-indigo-300/50 !bg-white/80' : ''">
+            
+            <div @click="toggleEtape(etape)" class="px-8 py-6 flex justify-between items-center hover:bg-white/40 transition-colors cursor-pointer select-none">
+              <div class="overflow-hidden">
+                <div class="text-[10px] font-black text-indigo-500 tracking-widest mb-1.5 flex items-center gap-2 uppercase">ÉTAPE {{index+1}} <span class="bg-indigo-100 text-indigo-600 px-2 py-0.5 rounded-md text-[8px] opacity-0 group-hover:opacity-100 transition-opacity"><i class="material-icons text-[10px] align-text-bottom">drag_indicator</i> Glisser</span></div>
+                <h3 class="text-2xl font-black text-slate-800 truncate">{{ etape.localisation.villes.join(', ') || 'Indiquer Ville...' }}</h3>
+                <div class="text-xs font-bold text-slate-500 mt-2 flex items-center gap-1.5"><i class="material-icons text-[16px] text-slate-400">date_range</i> {{ etape.dates.arrivee || 'Arrivée' }} <span class="mx-1 text-slate-300">→</span> {{ etape.dates.depart || 'Départ' }}</div>
+              </div>
+              <div class="w-12 h-12 rounded-2xl bg-white/80 border border-white shadow-sm flex items-center justify-center transition-transform duration-500" :class="etape._isOpen ? 'rotate-180 bg-indigo-100 text-indigo-600' : 'text-slate-400'"><i class="material-icons text-2xl">expand_more</i></div>
+            </div>
+
+            <div v-show="etape._isOpen" class="px-8 py-8 bg-white/40 border-t border-white/50 space-y-7 cursor-auto" @mousedown.stop>
+              
+              <div class="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                <div v-for="(val, key) in {arrivee: 'Date Arrivée', depart: 'Date Départ'}" :key="key">
+                  <label class="text-[10px] font-black text-slate-500 uppercase mb-1.5 block tracking-wider">{{val}}</label>
+                  <input type="text" v-model="etape.dates[key]" class="w-full bg-white/80 border border-white rounded-2xl px-4 py-2.5 text-sm outline-none shadow-sm font-bold text-slate-700">
+                </div>
+                <div>
+                  <label class="text-[10px] font-black text-slate-500 uppercase mb-1.5 block tracking-wider">Pays</label>
+                  <input type="text" v-model="etape.localisation.pays" class="w-full bg-white/80 border border-white rounded-2xl px-4 py-2.5 text-sm outline-none shadow-sm font-bold text-slate-700">
+                </div>
+              </div>
+
+              <div>
+                <label class="text-[10px] font-black text-slate-500 uppercase mb-2 block tracking-wider">Villes visitées</label>
+                <div class="flex flex-wrap gap-2.5">
+                  <transition-group name="list">
+                    <div v-for="(ville, i) in etape.localisation.villes" :key="i" class="flex items-center bg-white/90 border border-white rounded-2xl px-4 py-2.5 shadow-sm focus-within:ring-2 ring-indigo-300 transition-all">
+                      <input type="text" v-model="etape.localisation.villes[i]" class="w-32 text-sm outline-none bg-transparent font-black text-slate-800">
+                      <button @click.stop="removeItem(etape.localisation.villes, i)" class="ml-1 w-6 h-6 rounded-full flex items-center justify-center text-slate-400 hover:bg-rose-500 hover:text-white transition-colors"><i class="material-icons text-[14px]">close</i></button>
+                    </div>
+                  </transition-group>
+                  <button @click="etape.localisation.villes.push('')" class="bg-indigo-50 border border-indigo-100 text-indigo-600 px-4 rounded-2xl text-xs font-black hover:bg-indigo-500 hover:text-white shadow-sm transition-all transform hover:-translate-y-1 flex items-center gap-1"><i class="material-icons text-[18px]">add_location_alt</i></button>
+                </div>
+              </div>
+
+              <div class="h-px w-full bg-white"></div>
+
+              <div class="relative">
+                <div class="absolute -left-8 top-0 bottom-0 w-1 bg-gradient-to-b from-amber-300 to-amber-500 rounded-r-lg"></div>
+                <h6 class="font-black text-sm text-slate-800 flex items-center gap-2.5 mb-3"><div class="p-1.5 bg-amber-400 text-white rounded-xl shadow-lg shadow-amber-400/40"><i class="material-icons text-[18px] block">hotel</i></div> Hébergement (Base)</h6>
+                <div class="bg-white/70 backdrop-blur-md p-2.5 rounded-3xl border border-white shadow-lg transition hover:shadow-xl">
+                  <div class="flex flex-wrap sm:flex-nowrap items-center gap-3 px-3 py-2">
+                    <input type="text" v-model="etape.hebergement.nom" placeholder="Hôtel / Airbnb..." class="flex-1 min-w-[150px] text-sm bg-transparent outline-none font-black text-slate-800">
+                    <div class="w-full sm:w-auto flex justify-end items-center gap-1.5 shrink-0 bg-white/80 px-2 py-1.5 rounded-xl border border-white shadow-sm">
+                      <input type="number" v-model.number="etape.hebergement.prix" placeholder="0" class="w-14 text-sm text-right bg-transparent outline-none font-black text-slate-800">
+                      <span class="text-xs text-slate-500 font-black">€</span>
+                      <div class="h-6 w-px bg-slate-200 mx-1"></div>
+                      <input type="checkbox" v-model="etape.hebergement.est_paye" class="checkbox-paye">
+                    </div>
+                  </div>
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 px-3 pb-2 pt-2 border-t border-white/50 mt-1">
+                    <div class="flex items-center gap-2.5 text-slate-500 bg-white/60 px-3 py-2 rounded-xl border border-white shadow-sm focus-within:border-amber-300 transition-colors">
+                      <i class="material-icons text-[16px] text-amber-500">my_location</i>
+                      <input type="text" v-model="etape.hebergement.adresse" placeholder="Adresse précise ou Coordonnées GPS" class="flex-1 text-[11px] bg-transparent outline-none text-slate-700 font-bold">
+                    </div>
+                    <div class="flex items-center gap-2.5 text-slate-500 bg-white/60 px-3 py-2 rounded-xl border border-white shadow-sm focus-within:border-indigo-300 transition-colors">
+                      <i class="material-icons text-[16px] text-indigo-500">link</i>
+                      <input type="text" v-model="etape.hebergement.lien_http" placeholder="Lien de réservation..." class="flex-1 text-[11px] bg-transparent outline-none text-indigo-600 font-bold">
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="relative">
+                <div class="absolute -left-8 top-0 bottom-0 w-1 bg-gradient-to-b from-rose-400 to-pink-500 rounded-r-lg"></div>
+                <div class="flex justify-between items-center mb-4">
+                  <h6 class="font-black text-sm text-slate-800 flex items-center gap-2.5"><div class="p-1.5 bg-rose-400 text-white rounded-xl shadow-lg shadow-rose-400/40"><i class="material-icons text-[18px] block">route</i></div> Itinéraire Journalier</h6>
+                  <button @click="ajouterGroupe(etape)" class="bg-white border border-white text-rose-500 px-4 py-2 rounded-xl text-xs font-black shadow-md flex items-center gap-1.5 hover:bg-rose-500 hover:text-white transition-all transform hover:-translate-y-1"><i class="material-icons text-[16px]">add_box</i> Ajouter une Journée</button>
+                </div>
+                
+                <div class="space-y-6">
+                  <transition-group name="list">
+                    <div v-for="(groupe, gIdx) in etape.groupes" :key="groupe.id" class="bg-white/60 backdrop-blur-xl rounded-[32px] border border-white shadow-lg overflow-hidden group/day transition-all hover:shadow-xl">
+                      
+                      <div class="px-5 py-4 flex items-center gap-4 border-b border-white/50 relative overflow-hidden bg-white/40">
+                        <div class="absolute inset-0 opacity-10" :style="{ backgroundColor: groupe.color }"></div>
+                        <div class="relative z-10 bg-white p-1 rounded-xl shadow-sm border border-white overflow-hidden w-10 h-10 flex shrink-0 items-center justify-center transform transition hover:scale-110">
+                          <input type="color" v-model="groupe.color" class="absolute w-[250%] h-[250%] cursor-pointer border-0 p-0" style="top:-75%;left:-75%;">
+                        </div>
+                        <input type="text" v-model="groupe.nom" class="relative z-10 font-black text-base bg-transparent outline-none flex-1 placeholder-slate-400" :style="{ color: groupe.color }">
+                        <button @click.stop="removeItem(etape.groupes, gIdx)" class="relative z-10 text-slate-400 hover:bg-rose-500 hover:text-white bg-white p-2 rounded-xl shadow-sm transition-transform hover:scale-110 border border-white"><i class="material-icons text-[18px] block">delete_outline</i></button>
+                      </div>
+
+                      <div class="p-4 relative">
+                        <div class="absolute left-9 top-4 bottom-4 w-1.5 rounded-full opacity-20" :style="{ backgroundColor: groupe.color }"></div>
+                        
+                        <transition-group name="list">
+                          <div v-for="(act, aIdx) in groupe.activites" :key="act.id || aIdx" class="flex flex-col gap-1.5 bg-white/80 p-3 rounded-2xl border-2 border-transparent shadow-md hover:border-white z-10 ml-3 mb-3 relative group/act transition-all hover:-translate-y-0.5" :style="{ borderLeftColor: groupe.color }">
+                            
+                            <div class="flex flex-wrap sm:flex-nowrap items-center gap-2.5 w-full">
+                              <div class="flex items-center gap-2.5 flex-1 min-w-[200px]">
+                                <div class="w-10 h-10 rounded-xl flex items-center justify-center text-[16px] font-black text-white shrink-0 shadow-md transition-transform group-hover/act:scale-110 group-hover/act:-rotate-6" :style="{ backgroundColor: groupe.color }" title="Saisir un Emoji !">
+                                  <span v-if="act.type === 'midi'">🍽️</span>
+                                  <span v-else-if="act.type === 'soir'">🌙</span>
+                                  <input v-else type="text" v-model="act.emoji" class="w-full h-full bg-transparent text-center text-white outline-none placeholder-white/80 p-0 m-0 cursor-pointer focus:ring-0" :placeholder="aIdx + 1" maxlength="2">
+                                </div>
+                                <input type="time" v-model="act.heure" class="text-sm bg-white border border-white rounded-xl px-2 py-2 outline-none w-[75px] shrink-0 text-center font-black font-mono shadow-sm">
+                                <input type="text" v-model="act.nom" placeholder="Activité / Lieu..." class="flex-1 w-full text-base bg-transparent outline-none font-black text-slate-800">
+                              </div>
+                              
+                              <div class="w-full sm:w-auto flex justify-end items-center ml-auto gap-1.5 shrink-0">
+                                <div class="flex items-center gap-1.5 bg-white px-2 py-1.5 rounded-xl border border-white shadow-sm">
+                                  <input type="number" v-model.number="act.prix" placeholder="0" class="w-14 text-sm text-right bg-transparent outline-none font-black text-slate-800">
+                                  <span class="text-xs text-slate-400 font-black">€</span>
+                                  <div class="h-5 w-px bg-slate-200 mx-0.5"></div>
+                                  <input type="checkbox" v-model="act.est_paye" class="checkbox-paye !w-5 !h-5">
+                                </div>
+                                <div class="flex items-center ml-1">
+                                  <div class="flex flex-col bg-white border border-slate-100 rounded-lg shadow-sm">
+                                    <button @click.stop="deplacerActivite(groupe.activites, aIdx, -1)" class="w-7 h-5 flex items-center justify-center text-slate-400 hover:text-indigo-500" :disabled="aIdx === 0"><i class="material-icons text-[14px]">expand_less</i></button>
+                                    <div class="h-px bg-slate-100"></div>
+                                    <button @click.stop="deplacerActivite(groupe.activites, aIdx, 1)" class="w-7 h-5 flex items-center justify-center text-slate-400 hover:text-indigo-500" :disabled="aIdx === groupe.activites.length - 1"><i class="material-icons text-[14px]">expand_more</i></button>
+                                  </div>
+                                  <button @click.stop="removeItem(groupe.activites, aIdx)" class="w-10 h-10 rounded-xl bg-white border border-slate-100 text-slate-400 hover:bg-rose-500 hover:text-white ml-1.5 shadow-sm flex items-center justify-center transition-all hover:scale-105"><i class="material-icons text-[18px]">delete_outline</i></button>
+                                </div>
+                              </div>
+                            </div>
+                            
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full pl-0 sm:pl-[52px] mt-1">
+                              <div class="flex items-center gap-2 bg-white/60 px-3 py-2 rounded-xl border border-white shadow-sm focus-within:border-slate-300">
+                                <i class="material-icons text-[14px] text-slate-400">place</i>
+                                <input type="text" v-model="act.adresse" placeholder="Adresse" class="flex-1 bg-transparent outline-none text-[11px] font-bold text-slate-700">
+                              </div>
+                              <div class="flex items-center gap-2 bg-white/60 px-3 py-2 rounded-xl border border-white shadow-sm focus-within:border-indigo-300">
+                                <i class="material-icons text-[14px] text-indigo-400">link</i>
+                                <input type="text" v-model="act.lien_http" placeholder="Lien Web" class="flex-1 bg-transparent outline-none text-[11px] font-bold text-indigo-600">
+                              </div>
+                            </div>
+                          </div>
+                        </transition-group>
+                        
+                        <div class="flex flex-wrap gap-2.5 items-center mt-4 pl-[52px] relative z-10">
+                          <button @click="addActivityToGroup(groupe, 'activite')" class="text-white px-3 py-2 rounded-xl text-[11px] font-black shadow-md transition-transform hover:-translate-y-1 flex items-center gap-1.5" :style="{ backgroundColor: groupe.color }"><i class="material-icons text-[16px]">add_location</i> Activité</button>
+                          <button @click="addActivityToGroup(groupe, 'midi')" class="bg-white border border-[#ff9500]/30 text-[#ff9500] px-3 py-2 rounded-xl text-[11px] font-black shadow-sm flex items-center gap-1.5 hover:bg-[#ff9500] hover:text-white transition-all transform hover:-translate-y-1">🍽️ Midi</button>
+                          <button @click="addActivityToGroup(groupe, 'soir')" class="bg-white border border-[#5856d6]/30 text-[#5856d6] px-3 py-2 rounded-xl text-[11px] font-black shadow-sm flex items-center gap-1.5 hover:bg-[#5856d6] hover:text-white transition-all transform hover:-translate-y-1">🌙 Soir</button>
+                        </div>
+                      </div>
+                    </div>
+                  </transition-group>
+                </div>
+              </div>
+
+              <div class="h-px w-full bg-white"></div>
+
+              <div class="relative">
+                <div class="absolute -left-8 top-0 bottom-0 w-1 bg-gradient-to-b from-[#5ac8fa] to-[#007aff] rounded-r-lg"></div>
+                <div class="flex justify-between items-center mb-4">
+                  <h6 class="font-black text-sm text-slate-800 flex items-center gap-2.5"><div class="p-1.5 bg-[#5ac8fa] text-white rounded-xl shadow-md"><i class="material-icons text-[18px] block">directions_transit</i></div> Transports</h6>
+                  <div class="flex gap-2">
+                    <button @click="addTransport(etape, 'avion')" class="bg-white border border-white text-[#007aff] px-3 py-1.5 rounded-xl text-xs font-black shadow-md flex items-center gap-1.5 hover:bg-[#007aff] hover:text-white transition-all transform hover:-translate-y-0.5"><i class="material-icons text-[16px]">flight</i> Vol</button>
+                    <button @click="addTransport(etape, 'train')" class="bg-white border border-white text-[#34c759] px-3 py-1.5 rounded-xl text-xs font-black shadow-md flex items-center gap-1.5 hover:bg-[#34c759] hover:text-white transition-all transform hover:-translate-y-0.5"><i class="material-icons text-[16px]">train</i> Train</button>
+                  </div>
+                </div>
+                
+                <div class="space-y-3">
+                  <transition-group name="list">
+                    <div v-for="(trans, i) in etape.transports" :key="i" class="flex flex-wrap sm:flex-nowrap items-center gap-3 bg-white/70 backdrop-blur-sm p-3 rounded-2xl border border-white shadow-sm">
+                      <div class="w-12 h-12 rounded-xl flex items-center justify-center shrink-0 text-white shadow-md" :class="trans.type === 'avion' ? 'bg-gradient-to-br from-[#5ac8fa] to-[#007aff]' : 'bg-gradient-to-br from-[#34c759] to-[#28cd41]'">
+                        <i class="material-icons text-[24px]">{{ trans.type === 'avion' ? 'flight_takeoff' : 'train' }}</i>
+                      </div>
+                      
+                      <div class="flex-1 min-w-[200px] flex items-center gap-2.5">
+                        <input type="text" v-model="trans.ref" placeholder="N°" class="w-16 text-sm bg-white border border-white rounded-xl px-2 py-2 outline-none font-black text-center uppercase shadow-sm">
+                        
+                        <div class="flex-1 flex flex-col gap-2">
+                          <div class="flex items-center gap-1.5">
+                            <input type="time" v-model="trans.heure_depart" class="w-[70px] text-[10px] bg-white border border-white rounded-lg px-1.5 py-1 outline-none font-mono shadow-sm text-center">
+                            <input type="text" v-model="trans.depart" placeholder="Gare / Aéroport Départ" class="flex-1 text-xs bg-transparent border-b border-white/50 focus:border-indigo-400 outline-none font-bold text-slate-700">
+                          </div>
+                          <div class="flex items-center gap-1.5">
+                            <input type="time" v-model="trans.heure_arrivee" class="w-[70px] text-[10px] bg-white border border-white rounded-lg px-1.5 py-1 outline-none font-mono shadow-sm text-center">
+                            <input type="text" v-model="trans.arrivee" placeholder="Destination Arrivée" class="flex-1 text-xs bg-transparent border-b border-white/50 focus:border-indigo-400 outline-none font-bold text-slate-700">
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="w-full sm:w-auto flex justify-end items-center ml-auto gap-1.5">
+                        <div class="flex items-center gap-1.5 bg-white px-3 py-2 rounded-xl border border-white shadow-sm">
+                          <label class="text-[9px] font-black text-slate-400 uppercase">Prix</label>
+                          <input type="number" v-model.number="trans.prix" placeholder="0" class="w-14 text-sm text-right bg-transparent outline-none font-black text-slate-800">
+                          <span class="text-xs text-slate-400 font-black">€</span>
+                          <div class="h-5 w-px bg-slate-200 mx-0.5"></div>
+                          <input type="checkbox" v-model="trans.est_paye" class="checkbox-paye !w-5 !h-5">
+                        </div>
+                        <button @click.stop="removeItem(etape.transports, i)" class="w-10 h-10 shrink-0 rounded-xl bg-white border border-slate-100 text-slate-400 hover:bg-rose-500 hover:text-white flex items-center justify-center shadow-sm transition-transform hover:scale-105 ml-1"><i class="material-icons text-[18px]">close</i></button>
+                      </div>
+                    </div>
+                  </transition-group>
+                </div>
+              </div>
+
+              <div class="flex justify-end pt-5 mt-2">
+                <button @click="supprimerEtape(index)" class="text-xs text-rose-500 bg-white hover:bg-rose-500 hover:text-white border border-white px-5 py-3 rounded-2xl font-black shadow-lg flex items-center gap-2 transition-all transform hover:-translate-y-1"><i class="material-icons text-[18px]">delete_forever</i> Supprimer Étape</button>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </transition-group>
+    </div>
+  </div>
+
+  <div class="h-full transition-all duration-500 ease-in-out relative flex-shrink-0 z-10 shadow-[inset_10px_0_30px_-10px_rgba(0,0,0,0.1)] overflow-hidden w-[35%]"
+       :class="{'w-[70%]': hoveredSection === 'right', 'w-[33.33%]': hoveredSection !== 'right'}" @mouseenter="hoveredSection = 'right'" @mouseleave="hoveredSection = null">
+    
+    <div id="map-container" class="w-full h-full bg-[#f2f2f7]"><div id="map" class="w-full h-full"></div></div>
+    
+    <div v-if="isMapLoading" class="absolute inset-0 bg-white/40 backdrop-blur-xl z-[2000] flex flex-col items-center justify-center text-slate-800 transition-opacity duration-500">
+      <div class="relative w-20 h-20 mb-4">
+        <div class="absolute inset-0 border-4 border-[#007aff]/20 rounded-full"></div>
+        <div class="absolute inset-0 border-4 border-[#007aff] rounded-full border-t-transparent animate-spin"></div>
+        <i class="material-icons absolute inset-0 flex items-center justify-center text-3xl text-[#007aff]">public</i>
+      </div>
+      <span class="font-black bg-white px-6 py-2 rounded-2xl tracking-widest text-[10px] shadow-xl border border-white text-[#007aff]">CALCUL EN COURS...</span>
+    </div>
+
+    <button @click="toggleRouting" class="absolute top-5 right-5 bg-white/90 backdrop-blur-md border border-white px-4 py-2 rounded-full shadow-lg z-[1000] text-[10px] font-bold flex items-center gap-1.5 transition-all hover:scale-105" :class="isRoutingEnabled ? 'text-[#007aff]' : 'text-slate-400'">
+      <i class="material-icons text-[14px]">{{ isRoutingEnabled ? 'route' : 'timeline' }}</i>
+      {{ isRoutingEnabled ? 'Routage ON' : 'Lignes Simples' }}
+    </button>
+    
+    <div v-if="activeEtapeName" class="absolute top-5 left-1/2 transform -translate-x-1/2 bg-white/90 backdrop-blur-md border border-white px-5 py-2.5 rounded-2xl shadow-lg z-[1000] text-sm font-black text-slate-800 flex items-center gap-2">
+      <div class="w-6 h-6 rounded-lg bg-[#007aff] text-white flex items-center justify-center shadow-md"><i class="material-icons text-[14px]">place</i></div>
+      {{ activeEtapeName }}
+    </div>
+
+    <button @click="renderGlobalMap" class="absolute bottom-8 left-1/2 transform -translate-x-1/2 bg-[#1c1c1e] text-white px-6 py-3.5 rounded-3xl font-black shadow-2xl flex items-center gap-3 z-[1000] transition-transform hover:-translate-y-1 text-xs">
+      <div class="w-6 h-6 rounded-lg bg-[#007aff] flex items-center justify-center shadow-md"><i class="material-icons text-[14px] text-white">public</i></div> VUE GLOBALE
+    </button>
+  </div>
+</div>
+
+<script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+  const { createApp } = Vue; 
+  const { jsPDF } = window.jspdf;
+
+  const generateId = () => Math.random().toString(36).substr(2, 9);
+  const gpsRegex = /^-?\d+(\.\d+)?,\s*-?\d+(\.\d+)?$/;
+  const PALETTE = ['#ff2d55', '#5856d6', '#34c759', '#ff9500', '#5ac8fa', '#af52de', '#ffcc00'];
+  
+  const getEmptyAct = (t='activite') => ({ id: generateId(), type: t, heure: '', nom: '', prix: null, adresse: '', lien_http: '', est_paye: false, emoji: '' });
+  const getEmptyGroupe = (i=0) => ({ id: generateId(), nom: `Jour ${i+1}`, color: PALETTE[i % PALETTE.length], note: '', activites: [] });
+  const fmt = (v) => `${v ?? 0} €`;
+
+  const createMarkerIcon = (innerHtml, color, isGlobal = false, isHotel = false) => {
+      let iconClass = isGlobal ? 'marker-global' : isHotel ? 'marker-hotel' : '';
+      let s = isGlobal ? 28 : 34; 
+      return L.divIcon({
+        className: 'custom-div-icon',
+        html: `
+          <div class="marker-pin-container ${iconClass}" style="width:${s}px; height:${s}px;">
+            <div class="marker-pin" style="${color ? `background-color:${color}; border-color:white;` : ''}">${innerHtml}</div>
+            <div class="marker-tail" style="${color ? `border-top-color:white;` : ''}"></div>
+            <div class="marker-tail-inner" style="${color ? `border-top-color:${color};` : ''}"></div>
+          </div>`,
+        iconSize: [s, s + 12], 
+        iconAnchor: [s/2, s + 10], 
+        popupAnchor: [0, -(s + 10)]
+      });
+  };
+
+  const createHotelIcon = () => createMarkerIcon('🏨', '#f59e0b', false, true);
+
+  createApp({
+    data: () => ({
+      hoveredSection: null, isMapLoading: false, draggedIndex: null, isGeneratingPDF: false, pdfLoadingMessage: 'Création...',
+      isRoutingEnabled: true, currentMapContext: 'global',
+      routeCache: new Map(),
+      voyage: { titre: '', remarques: '', depart: { ville: '', pays: '' }, participants: [], etapes: [] },
+      activeEtapeName: "APERÇU GLOBAL"
+    }),
+    
+    computed: {
+      stats() {
+        let g=0, p=0, pe=0;
+        this.voyage.etapes.forEach(e => {
+          const hP = Number(e.hebergement.prix) || 0; g += hP; pe += hP/2; if(e.hebergement.est_paye) p += hP/2;
+          const addC = (a) => (a||[]).forEach(i => { const px = Number(i.prix)||0; g += px; pe += px; if(i.est_paye) p += px; });
+          addC(e.transports); (e.groupes||[]).forEach(gr => addC(gr.activites));
+        });
+        return { totalGlobal: Math.round(g), parPersonne: Math.round(pe), dejaPaye: Math.round(p), resteAPayer: Math.round(pe-p), pourcentagePaye: pe>0 ? (p/pe)*100 : 0 };
+      }
+    },
+
+    watch: {
+      voyage: {
+        deep: true,
+        handler(val) {
+          localStorage.setItem('voyageFinalEdition', JSON.stringify(val));
+          if (this.mapUpdateTimeout) clearTimeout(this.mapUpdateTimeout);
+          this.mapUpdateTimeout = setTimeout(() => {
+            if (this.currentMapContext === 'global') this.renderGlobalMap(); else this.renderEtapeMap(this.currentMapContext);
+          }, 800);
+        }
+      }
+    },
+
+    mounted() {
+      // FIX CARTE CASSÉE: On exclut formellement les objets Leaflet de l'état réactif Vue ("data")
+      this.map = L.map('map', { zoomControl: false }).setView([46, 2], 5);
+      this._markers = []; 
+      this._polylines = [];
+      
+      const saved = localStorage.getItem('voyageFinalEdition'); if (saved) { try { this.voyage = JSON.parse(saved); } catch(e) {} }
+      
+      L.control.zoom({ position: 'bottomright' }).addTo(this.map);
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { attribution: '© OSM', maxZoom: 19 }).addTo(this.map);
+      new ResizeObserver(() => { if (this.map) setTimeout(() => this.map.invalidateSize(), 50); }).observe(document.getElementById('map-container'));
+      
+      if(this.voyage.etapes.length > 0) {
+          if(!this.voyage.etapes.some(e => e._isOpen)) this.voyage.etapes[0]._isOpen = true;
+          this.renderEtapeMap(this.voyage.etapes.find(e => e._isOpen) || this.voyage.etapes[0]);
+      } else {
+          this.renderGlobalMap();
+      }
+    },
+
+    methods: {
+      removeItem(a, i) { a.splice(i, 1); },
+      deplacerActivite(a, i, d) { const n = i + d; if (n < 0 || n >= a.length) return; a.splice(n, 0, a.splice(i, 1)[0]); },
+      ajouterGroupe(e) { e.groupes.push(getEmptyGroupe(e.groupes.length)); },
+      addActivityToGroup(g, t) { g.activites.push({ ...getEmptyAct(t), nom: t === 'midi' ? 'Déjeuner' : t === 'soir' ? 'Dîner' : '' }); },
+      addTransport(e, t) { e.transports.push({ type: t, depart: '', arrivee: '', heure_depart: '', heure_arrivee: '', ref: '', prix: null, est_paye: false }); },
+      addEtape() { this.voyage.etapes.push({ id: generateId(), _isOpen: true, dates: { arrivee: '', depart: '' }, localisation: { villes: [], pays: '' }, hebergement: { nom: '', adresse: '', lien_http: '', prix: null, est_paye: false }, transports: [], groupes: [getEmptyGroupe(0)] }); },
+      supprimerEtape(i) { if (confirm('Supprimer cette étape ?')) this.voyage.etapes.splice(i, 1); },
+      dragStart(i, e) { this.draggedIndex = i; e.dataTransfer.effectAllowed = 'move'; },
+      drop(i) { if (this.draggedIndex === null || this.draggedIndex === i) return; this.voyage.etapes.splice(i, 0, this.voyage.etapes.splice(this.draggedIndex, 1)[0]); this.draggedIndex = null; },
+      
+      toggleEtape(et) { 
+          const o = et._isOpen; 
+          this.voyage.etapes.forEach(e => e._isOpen = false); 
+          et._isOpen = !o; 
+          if (et._isOpen) this.renderEtapeMap(et); else this.renderGlobalMap();
+      },
+
+      toggleRouting() {
+          this.isRoutingEnabled = !this.isRoutingEnabled;
+          if (this.currentMapContext === 'global') this.renderGlobalMap(); else this.renderEtapeMap(this.currentMapContext);
+      },
+      
+      clearMap() { 
+          this._markers.forEach(m => this.map.removeLayer(m)); 
+          this._polylines.forEach(p => this.map.removeLayer(p)); 
+          this._markers = []; this._polylines = [];
+      },
+      
+      async resolveLocation(q, b) {
+        if (!q) return null;
+        if (gpsRegex.test(q.trim())) { const [la, lo] = q.split(',').map(Number); return { lat: la, lon: lo }; }
+        try {
+          const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(b ? `${q} ${b}` : q)}&format=json&limit=1`);
+          const d = await r.json();
+          if (d.length) return { lat: parseFloat(d[0].lat), lon: parseFloat(d[0].lon) };
+        } catch (e) {} return null;
+      },
+      
+      async calcRoute(p1, p2) {
+        const d = L.latLng(p1.lat, p1.lon).distanceTo(L.latLng(p2.lat, p2.lon));
+        const cacheKey = `${p1.lat.toFixed(4)},${p1.lon.toFixed(4)}_${p2.lat.toFixed(4)},${p2.lon.toFixed(4)}`;
+        
+        if(!this.isRoutingEnabled || d > 300000) {
+            let s = d > 300000 ? 800 : d < 3000 ? 4 : 60, m = d > 300000 ? '✈️' : d < 3000 ? '🚶' : '🚗';
+            let t = (d / 1000) / s, h = Math.floor(t), mn = Math.round((t - h) * 60);
+            if (mn === 60) { h++; mn = 0; }
+            return { path: [[p1.lat, p1.lon], [p2.lat, p2.lon]], distStr: d >= 1000 ? `${(d/1000).toFixed(0)} km` : `${Math.round(d)} m`, timeStr: `${h > 0 ? h + 'h ' : ''}${mn}m`, mode: m, dash: '8, 10' };
+        }
+        
+        if(this.routeCache.has(cacheKey)) return this.routeCache.get(cacheKey);
+
+        try {
+            const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${p1.lon},${p1.lat};${p2.lon},${p2.lat}?overview=simplified&geometries=geojson`);
+            const data = await res.json();
+            if(data.routes && data.routes[0]) {
+                const r = data.routes[0];
+                const path = r.geometry.coordinates.map(c => [c[1], c[0]]);
+                const timeMin = Math.round(r.duration / 60);
+                const h = Math.floor(timeMin/60), m = timeMin%60;
+                const result = { path, distStr: `${(r.distance/1000).toFixed(1)} km`, timeStr: `${h>0?h+'h ':''}${m}m`, mode: '🚗', dash: null };
+                this.routeCache.set(cacheKey, result);
+                return result;
+            }
+        } catch(e) {}
+
+        const fallback = { path: [[p1.lat, p1.lon], [p2.lat, p2.lon]], distStr: '', timeStr: '', mode: '🚗', dash: '8, 10' };
+        this.routeCache.set(cacheKey, fallback);
+        return fallback;
+      },
+
+      async renderGlobalMap() {
+        this.isMapLoading = true; this.clearMap(); this.activeEtapeName = "APERÇU GLOBAL";
+        this.currentMapContext = 'global';
+        this.voyage.etapes.forEach(e => e._isOpen = false);
+        
+        try {
+            let gB = [], prv = null;
+            let orPt = await this.resolveLocation(this.voyage.depart?.ville || '', this.voyage.depart?.pays || '');
+            
+            if (orPt) {
+              this._markers.push(L.marker([orPt.lat, orPt.lon], { icon: createMarkerIcon(`<i class="material-icons" style="font-size:16px;">home</i>`, null, true, false) }).addTo(this.map).bindPopup(`<div style="padding:5px;"><b style="color:#007aff;font-size:14px;">🏡 Départ</b><br><span style="color:#86868b;font-size:12px;">${this.voyage.depart.ville}</span></div>`));
+              gB.push([orPt.lat, orPt.lon]); prv = orPt;
+            }
+
+            for (let i = 0; i < this.voyage.etapes.length; i++) {
+              let e = this.voyage.etapes[i], b = e.localisation?.villes?.[0]?.replace(/[()]/g, '').trim() || '';
+              let pt = await this.resolveLocation(e.hebergement?.adresse || e.hebergement?.nom, b) || await this.resolveLocation(b);
+              if (pt) {
+                this._markers.push(L.marker([pt.lat, pt.lon], { icon: createMarkerIcon(i + 1, null, true, false) }).addTo(this.map).bindPopup(`<div style="padding:5px;"><b style="color:#007aff;font-size:14px;">Étape ${i + 1}: ${b}</b><br><span style="color:#86868b;font-size:12px;">${e.dates.arrivee || '?'} - ${e.dates.depart || '?'}</span></div>`));
+                gB.push([pt.lat, pt.lon]);
+                if (prv) {
+                  let r = await this.calcRoute(prv, pt);
+                  let poly = L.polyline(r.path, { color: '#007aff', weight: 4, opacity: 0.6, lineJoin: 'round', dashArray: r.dash, className: r.dash ? 'animated-path-global' : '' }).addTo(this.map);
+                  if (r.distStr) poly.bindTooltip(`${r.mode} ${r.distStr} | ${r.timeStr}`, { sticky: true, className: 'glass-tooltip' });
+                  this._polylines.push(poly);
+                }
+                prv = pt;
+              }
+            }
+            if (gB.length) this.map.fitBounds(gB, { padding: [80, 80], maxZoom: 8 });
+        } finally {
+            this.isMapLoading = false; 
+        }
+      },
+
+      async renderEtapeMap(et) {
+        if(!et) return;
+        this.isMapLoading = true; this.clearMap();
+        this.currentMapContext = et;
+        
+        try {
+            const b = et.localisation?.villes?.[0]?.replace(/[()]/g, '').trim() || '';
+            this.activeEtapeName = b || 'Recherche Géographique...';
+            let gB = [];
+            
+            let hPt = await this.resolveLocation(et.hebergement?.adresse || et.hebergement?.nom, b);
+            if (!hPt && b) hPt = await this.resolveLocation(b);
+            
+            if (hPt) {
+              this._markers.push(L.marker([hPt.lat, hPt.lon], { icon: createHotelIcon() }).addTo(this.map).bindPopup(`<div style="padding:5px;"><b style="color:#ff9500;font-size:14px;">🏨 Base (Hébergement)</b><br><span style="color:#86868b;font-size:12px;">${et.hebergement.nom || b}</span></div>`));
+              gB.push([hPt.lat, hPt.lon]);
+            }
+
+            for (let g of (et.groupes || [])) {
+              let dC = [], prv = hPt; 
+              let aI = 1;
+              for (let i = 0; i < g.activites.length; i++) {
+                let a = g.activites[i];
+                let pt = await this.resolveLocation(a.adresse || a.nom, b);
+                if (pt) {
+                  let isMidi = a.type === 'midi'; let isSoir = a.type === 'soir';
+                  let iconStr = isMidi ? '🍽️' : isSoir ? '🌙' : (a.emoji || aI++);
+                  let color = isMidi ? '#ff9500' : isSoir ? '#5856d6' : g.color;
+                  
+                  this._markers.push(L.marker([pt.lat, pt.lon], { icon: createMarkerIcon(iconStr, color) }).addTo(this.map).bindPopup(`<div style="padding:5px;"><b style="color:${color};font-size:14px;">${g.nom}</b><br><span style="color:#86868b;font-size:12px;font-weight:bold;">${a.heure ? a.heure + ' : ' : ''}${a.nom}</span></div>`));
+                  dC.push([pt.lat, pt.lon]); gB.push([pt.lat, pt.lon]);
+                  
+                  if (prv) {
+                    let r = await this.calcRoute(prv, pt);
+                    let isAller = (prv === hPt && i === 0);
+                    let prefix = isAller ? '🛫 Aller : ' : '➡️ Étape : ';
+                    let poly = L.polyline(r.path, { color: color, weight: isAller ? 5 : 4, opacity: 0.9, lineJoin: 'round', dashArray: r.dash, className: r.dash ? 'animated-path' : '' }).addTo(this.map);
+                    if(r.distStr) poly.bindTooltip(`<b>${prefix}</b>${r.mode} ${r.distStr} | ${r.timeStr}`, { sticky: true, className: 'glass-tooltip' });
+                    this._polylines.push(poly);
+                  }
+                  prv = pt;
+                }
+              }
+              if (hPt && dC.length > 0 && prv !== hPt) {
+                 let r = await this.calcRoute(prv, hPt);
+                 let poly = L.polyline(r.path, { color: g.color, weight: 3, opacity: 0.6, lineJoin: 'round', dashArray: '6, 12', className: 'animated-path' }).addTo(this.map);
+                 if(r.distStr) poly.bindTooltip(`<b>🛬 Retour :</b> ${r.mode} ${r.distStr} | ${r.timeStr}`, { sticky: true, className: 'glass-tooltip' });
+                 this._polylines.push(poly);
+              }
+            }
+            if (gB.length) this.map.fitBounds(gB, { padding: [100, 100], maxZoom: 16 });
+        } finally {
+            this.isMapLoading = false;
+        }
+      },
+
+      saveFile() {
+        const d = JSON.parse(JSON.stringify(this.voyage));
+        d.etapes.forEach(e => { delete e._isOpen; });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(new Blob([JSON.stringify({ voyage: d }, null, 2)], { type: 'application/json' }));
+        link.download = (this.voyage.titre || 'itineraire') + '.json'; link.click();
+      },
+
+      loadFile(ev) {
+        const f = ev.target.files[0]; if (!f) return;
+        const r = new FileReader();
+        r.onload = (e) => {
+          try {
+            let d = JSON.parse(e.target.result); d = d.voyage || d;
+            d.depart = d.depart || { ville: '', pays: '' };
+            d.remarques = d.remarques || (d.synthese_financiere?.remarques || []).join('\n') || '';
+            
+            d.etapes = (d.etapes || []).map(et => {
+              let t = et.transports || [];
+              if (et.transport && !t.length) {
+                const px = et.transport.prix?.montant ?? 0, py = et.transport.prix?.est_paye ?? false;
+                if (et.transport.references?.length) et.transport.references.forEach(rf => t.push({ type: 'avion', depart: '', arrivee: '', heure_depart: '', heure_arrivee: '', ref: rf, prix: Math.round(px / et.transport.references.length), est_paye: py }));
+                else if (px > 0) t.push({ type: 'train', depart: '', arrivee: '', heure_depart: '', heure_arrivee: '', ref: '', prix: px, est_paye: py });
+              }
+              // Retrocompatibilité transports (Ajout horaires)
+              t.forEach(tr => { tr.heure_depart = tr.heure_depart || ''; tr.heure_arrivee = tr.heure_arrivee || ''; });
+
+              let gs = et.groupes || [];
+              if (!gs.length && et.programme?.activites?.length) gs.push({ id: generateId(), nom: 'Jour 1', color: PALETTE[0], note: '', activites: et.programme.activites.map(a => typeof a === 'string' ? { id: generateId(), type: 'activite', nom: a, heure: '', prix: 0, adresse: '', lien_http: '', est_paye: false, emoji: '' } : { ...a, id: a.id || generateId(), type: a.type || 'activite', emoji: a.emoji || '' }) });
+              else if (!gs.length) gs.push(getEmptyGroupe(0));
+              
+              if (et.restaurants?.length) et.restaurants.forEach(rest => gs[0].activites.push({ id: generateId(), type: rest.type || 'midi', heure: rest.date||'', nom: rest.nom, prix: rest.prix, adresse: rest.adresse, lien_http: '', est_paye: rest.est_paye, emoji: '' }));
+              
+              gs.forEach((g, i) => { g.color = g.color || PALETTE[i % PALETTE.length]; g.note = g.note || ''; g.activites = g.activites || []; });
+              
+              return { ...et, id: et.id || generateId(), _isOpen: false, dates: et.dates || { arrivee: '', depart: '' }, localisation: et.localisation || { villes: [], pays: '' }, hebergement: { nom: et.hebergement?.nom || '', adresse: et.hebergement?.adresse || '', lien_http: et.hebergement?.lien_http || '', prix: et.hebergement?.prix?.montant ?? et.hebergement?.prix ?? 0, est_paye: et.hebergement?.est_paye || false }, transports: t, groupes: gs };
+            });
+            this.voyage = d; 
+            if (this.voyage.etapes.length) {
+              this.voyage.etapes[0]._isOpen = true;
+              setTimeout(() => this.renderEtapeMap(this.voyage.etapes[0]), 500);
+            }
+          } catch (er) { alert('Erreur JSON : ' + er.message); }
+        }; r.readAsText(f);
+      },
+
+      async generateCleanPDF() {
+        this.isGeneratingPDF = true; this.pdfLoadingMessage = 'Préparation UI...'; await this.$nextTick();
+        try {
+          const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: [100, 178] });
+          const PW = doc.internal.pageSize.getWidth(), PH = doc.internal.pageSize.getHeight(), M = 6, CW = PW - M * 2;
+          
+          if (!this.cachedFontBase64) {
+            this.pdfLoadingMessage = 'Téléchargement police...';
+            const b = await (await fetch('https://cdn.jsdelivr.net/npm/@electron-fonts/noto-sans-sc@1.2.0/fonts/NotoSansSC-Regular.ttf')).blob();
+            this.cachedFontBase64 = await new Promise(r => { const f = new FileReader(); f.onloadend = () => r(f.result.split(',')[1]); f.readAsDataURL(b); });
+          }
+          this.pdfLoadingMessage = 'Dessin du Document...';
+          doc.addFileToVFS('Noto.ttf', this.cachedFontBase64); ['normal', 'bold'].forEach(w => doc.addFont('Noto.ttf', 'Noto', w));
+          
+          const rgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+          const Rect = (x,y,w,h,c,f='F') => { doc.setFillColor(...rgb(c)); doc.setDrawColor(...rgb(c)); doc.roundedRect(x,y,w,h,2,2,f); };
+          const Txt = (t,x,y,c,s=8,b='normal',a='left') => { doc.setFont('Noto',b); doc.setFontSize(s); doc.setTextColor(...rgb(c)); doc.text(t,x,y,{align:a}); };
+          const tbl = o => doc.autoTable({ margin: { left: M, right: M }, styles: { font: 'Noto' }, tableWidth: CW, ...o });
+
+          // Header
+          Rect(M, M, CW, 18, '#f2f2f7'); Txt(this.voyage.titre || 'Mon Voyage', PW / 2, M + 8, '#1d1d1f', 14, 'bold', 'center'); 
+          if (this.voyage.participants?.length) Txt(this.voyage.participants.join(' · '), PW / 2, M + 14, '#86868b', 7, 'normal', 'center');
+          
+          // Badges Budget
+          const gap = 2, bW = (CW - (gap * 2)) / 3; doc.setDrawColor('#e5e5ea'); doc.setLineWidth(0.3);
+          Rect(M, 28, bW, 12, '#ffffff', 'FD'); Txt('BUDGET PERSO', M + 2, 32, '#86868b', 5, 'bold'); Txt(`${this.stats.parPersonne} €`, M + 2, 38, '#007aff', 10, 'bold');
+          Rect(M + bW + gap, 28, bW, 12, '#ffffff', 'FD'); Txt('DÉJÀ PAYÉ', M + bW + gap + 2, 32, '#86868b', 5, 'bold'); Txt(`${this.stats.dejaPaye} €`, M + bW + gap + 2, 38, '#34c759', 10, 'bold');
+          Rect(M + (bW + gap) * 2, 28, bW, 12, '#ffffff', 'FD'); Txt('RESTE À PAYER', M + (bW + gap) * 2 + 2, 32, '#86868b', 5, 'bold'); Txt(`${this.stats.resteAPayer} €`, M + (bW + gap) * 2 + 2, 38, '#ff3b30', 10, 'bold');
+
+          let y = 45;
+          
+          if(this.voyage.remarques) {
+             Rect(M, y, CW, 12, '#fffcf0'); Txt('📝 NOTES GLOBALES', M+2, y+4, '#d97706', 7, 'bold');
+             const rmLines = doc.splitTextToSize(this.voyage.remarques, CW-4); Txt(rmLines, M+2, y+8, '#1d1d1f', 7);
+             y += 10 + (rmLines.length * 3);
+          }
+
+          this.voyage.etapes.forEach((e, idx) => {
+            if (y > PH - 40) { doc.addPage(); y = 12; }
+            Rect(M, y, CW, 10, '#f2f2f7'); Txt(`${idx + 1}. ${e.localisation.villes.join(', ') || 'Dest.'}`, M + 2, y + 7, '#1d1d1f', 10, 'bold'); Txt(`${e.dates.arrivee || '?'} > ${e.dates.depart || '?'}`, PW - M - 2, y + 7, '#86868b', 8, 'normal', 'right'); y += 14;
+
+            if (e.hebergement?.nom) {
+              let sH = doc.splitTextToSize(e.hebergement.nom, CW - 45), hB = 8 + (sH.length * 4);
+              Rect(M, y, CW, hB, '#ffffff', 'FD'); Rect(M, y, 3, hB, '#ff9500'); Txt('🏨 HÔTEL', M + 5, y + 5, '#ff9500', 8, 'bold');
+              let oX = M + 23;
+              if (e.hebergement.adresse) { Rect(oX, y + 1.5, 14, 4, '#e0f2fe'); Txt('↗ MAPS', oX + 7, y + 4.5, '#007aff', 5, 'bold', 'center'); doc.link(oX, y + 1.5, 14, 4, { url: `https://google.com/maps/search/?api=1&query=$${encodeURIComponent(e.hebergement.adresse)}` }); oX += 16; }
+              if (e.hebergement.lien_http) { Rect(oX, y + 1.5, 12, 4, '#f2f2f7'); Txt('🌐 WEB', oX + 6, y + 4.5, '#86868b', 5, 'bold', 'center'); doc.link(oX, y + 1.5, 12, 4, { url: e.hebergement.lien_http }); }
+              Txt(sH, M + 23, y + 9, e.hebergement.lien_http ? '#007aff' : '#1d1d1f', 8, 'bold');
+              if (e.hebergement.lien_http) doc.link(M + 23, y + 6, CW - 45, sH.length * 4, { url: e.hebergement.lien_http });
+              if (e.hebergement.est_paye) { Rect(PW - M - 20, y + 2, 18, 5, '#e8fcf0'); Txt(`✓ ${fmt(e.hebergement.prix)}`, PW - M - 11, y + 5.5, '#34c759', 8, 'bold', 'center'); } else { Rect(PW - M - 20, y + 2, 18, 5, '#ffeceb'); Txt(`⚠️ ${fmt(e.hebergement.prix)}`, PW - M - 11, y + 5.5, '#ff3b30', 8, 'bold', 'center'); }
+              y += hB + 4;
+            }
+
+            const tR = (e.transports || []).map(t => { 
+              let dep = t.heure_depart ? `${t.heure_depart} ` : '';
+              let arr = t.heure_arrivee ? `${t.heure_arrivee} ` : '';
+              return { 0: t.type === 'avion' ? '✈️ Vol' : '🚆 Train', 1: (t.ref ? t.ref + '\n' : '') + `${dep}${t.depart || '?'} > ${arr}${t.arrivee || '?'}`, _px: t.prix, _py: t.est_paye } 
+            });
+            if (tR.length) {
+              tbl({ startY: y, head: [['Transp.', 'Trajet', 'Prix']], body: tR, theme: 'plain', headStyles: { fillColor: [242, 242, 247], textColor: [134, 134, 139], fontSize: 7, fontStyle: 'bold' }, bodyStyles: { fontSize: 7, borderBottom: '1px solid #e5e5ea' }, columnStyles: { 0: { cellWidth: 14 }, 1: { cellWidth: 'auto' }, 2: { cellWidth: 18, halign: 'right' } },
+              didDrawCell: d => { if (d.section === 'body' && d.column.index === 2) { let py = tR[d.row.index]._py, px = fmt(tR[d.row.index]._px); Rect(d.cell.x + 1, d.cell.y + 1, d.cell.width - 2, d.cell.height - 2, py ? '#e8fcf0' : '#ffeceb'); Txt(px, d.cell.x + d.cell.width / 2, d.cell.y + d.cell.height / 2 - 1, py ? '#166534' : '#be123c', 8, 'bold', 'center'); Txt(py ? '✓ PAYÉ' : '⚠️ À RÉGLER', d.cell.x + d.cell.width / 2, d.cell.y + d.cell.height / 2 + 3, py ? '#34c759' : '#ff3b30', 5, 'bold', 'center'); d.cell.text = []; } } }); y = doc.lastAutoTable.finalY + 4;
+            }
+
+            (e.groupes || []).forEach(g => {
+              if (g.activites.length === 0 && !g.note) return;
+              if (y > PH - 25) { doc.addPage(); y = 12; } else { y += 2; }
+              Rect(M, y, CW, 7, g.color || '#ec4899'); Txt(g.nom, M + 2, y + 5, '#ffffff', 8, 'bold'); y += 8;
+              let aI = 1;
+              const aR = g.activites.map(a => { 
+                let iconTxt = a.type === 'midi' ? '🍽️ Midi' : a.type === 'soir' ? '🌙 Soir' : `${a.emoji || aI++}.`;
+                return { 0: `${iconTxt} ${a.heure || '-'}`, 1: a.nom || '—', _px: a.prix, _py: a.est_paye, _adr: a.adresse, _lnk: a.lien_http } 
+              });
+              if (aR.length) {
+                tbl({ startY: y, head: [['H.', 'Activité', 'Prix']], body: aR, theme: 'plain', headStyles: { fillColor: [242, 242, 247], textColor: [134, 134, 139], fontSize: 7, fontStyle: 'bold', lineWidth: 0.1, lineColor: [229, 229, 234] }, bodyStyles: { fontSize: 7, borderBottom: '1px solid #f2f2f7' }, columnStyles: { 0: { cellWidth: 15 }, 1: { cellWidth: 'auto' }, 2: { cellWidth: 18, halign: 'right' } },
+                didDrawCell: d => {
+                  if (d.section === 'body') { let rw = aR[d.row.index];
+                    if (d.column.index === 2) { let py = rw._py, px = fmt(rw._px); Rect(d.cell.x + 1, d.cell.y + 1, d.cell.width - 2, d.cell.height - 2, py ? '#e8fcf0' : '#ffeceb'); Txt(px, d.cell.x + d.cell.width / 2, d.cell.y + d.cell.height / 2 - 1, py ? '#166534' : '#be123c', 8, 'bold', 'center'); Txt(py ? '✓ PAYÉ' : '⚠️ À RÉGLER', d.cell.x + d.cell.width / 2, d.cell.y + d.cell.height / 2 + 3, py ? '#34c759' : '#ff3b30', 5, 'bold', 'center'); d.cell.text = []; }
+                    if (d.column.index === 1) { let a = rw._adr, l = rw._lnk, pY = d.cell.y + d.cell.height - 3, oX = d.cell.x; if (a) { Rect(oX, pY - 2.5, 14, 4, '#e0f2fe'); Txt('↗ MAPS', oX + 7, pY+0.5, '#007aff', 5, 'bold', 'center'); doc.link(oX, pY - 2.5, 14, 4, { url: `https://google.com/maps/search/?api=1&query=$${encodeURIComponent(a)}` }); oX += 16; } if (l) { Rect(oX, pY - 2.5, 14, 4, '#f2f2f7'); Txt('🌐 WEB', oX + 7, pY+0.5, '#86868b', 5, 'bold', 'center'); doc.link(oX, pY - 2.5, 14, 4, { url: l }); } }
+                  }
+                }}); y = doc.lastAutoTable.finalY + 3;
+              }
+            });
+          });
+          const tot = doc.internal.pages.length - 1; for (let i = 1; i <= tot; i++) { doc.setPage(i); Txt(`Voyage Manager Apple UI • Page ${i} / ${tot}`, PW / 2, PH - 4, '#86868b', 7, 'normal', 'center'); } 
+          doc.save(`${this.voyage.titre || 'Itineraire'}.pdf`);
+        } catch (err) { alert('Erreur : ' + err.message); } finally { this.isGeneratingPDF = false; }
+      }
+    }
+  }).mount('#app');
+</script>
+</body>
+</html>
